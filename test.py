@@ -63,9 +63,6 @@ def main(data_dir, saved_model_path, batch_size, summary):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     test_data_loader = CIFAR10DataLoader(data_dir, batch_size=batch_size, training=False)
 
-    # print(f'{saved_model_path = }')
-
-
     # bottleneck blocks configurations:
     #   (expansion, out_planes, num_blocks, stride)
     cfg_btn = [

@@ -38,6 +38,8 @@ python test.py --data_dir "/home/jinho/ML-datasets/cifar"  \
 
 ```
 
+### Project Template I used
+[pytorch-template](https://github.com/victoresque/pytorch-template)
 
 
 ### TODO
