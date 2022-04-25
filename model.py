@@ -199,7 +199,7 @@ class MobileNetV2_with_CSE(nn.Module):
             3, 32, kernel_size=3, stride=1, padding=1, bias=False
         )
         self.bn1 = nn.BatchNorm2d(32)
-        self.act1 = nn.ReLU()
+        self.act1 = nn.PReLU()
 
         self.btn_blocks = self._btn_blocks(in_planes=32)
         self.cse_blocks = self._cse_blocks(in_planes=32)
@@ -214,7 +214,7 @@ class MobileNetV2_with_CSE(nn.Module):
             bias=False,
         )
         self.bn2 = nn.BatchNorm2d(1280)
-        self.act2 = nn.ReLU()
+        self.act2 = nn.PReLU()
         self.avgpool_conv1 = nn.Conv2d(
             1280,
             1280,

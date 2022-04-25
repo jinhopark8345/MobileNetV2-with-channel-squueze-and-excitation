@@ -1,7 +1,13 @@
 # Further Optimize MobileNetV2 with channel squeeze and excitation
 
-# Quick Start
+# Environment
+```bash
+Python 3.8
+torch 1.10.0+cu113
+```
 
+
+# Quick Start
 ### Training from scratch
 ```bash
 # Train a network from beginning
@@ -46,12 +52,16 @@ python test.py --data_dir "/home/jinho/ML-datasets/cifar"  \
 
 ```
 ### organize source code
-- [ ] requirements.txt
+- [ ] add requirements.txt
 - [ ] Trainer class : make methods for one epoch running and print statistics
 - [ ] Tester class  : make methods for one epoch running and print statistics
+- [ ] Trainer, tester class : use dataclass to make code cleaner
+- [ ] add data loader for cifar100, imagenette, imagewolf
+- [ ] make logger class (check out the template project) / measure inferencing time, size ..
 
 ### readme 
 - [ ] add more introduction
 - [ ] add reference & citation
 - [ ] add notion explanation 
+- [ ] add environment 
 ```

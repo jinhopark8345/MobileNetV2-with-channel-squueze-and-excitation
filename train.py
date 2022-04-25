@@ -3,6 +3,7 @@ import numpy as np
 import datetime
 import argparse
 import torch
+from dataclasses import dataclass
 
 import utils
 from pathlib import Path
@@ -189,7 +190,7 @@ def main(data_dir, epoch, batch_size, summary, resume=False):
         save_folder_path = str(Path(resume_checkpoint_path).parent) + "/"
     else:
         save_folder_path = (
-            "./save/"
+            "./saved/"
             + datetime.datetime.now().strftime("%Y-%m-%d-%Hh-%Mm-%Ss")
             + f"-batch_size-{batch_size}-max_epoch-{epoch}/"
         )
