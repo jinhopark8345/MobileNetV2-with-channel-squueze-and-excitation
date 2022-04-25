@@ -1,81 +1,105 @@
+import os
+import numpy as np
+import datetime
 import argparse
 import torch
-from tqdm import tqdm
-import data_loader.data_loaders as module_data
-import model.loss as module_loss
-import model.metric as module_metric
-import model.model as module_arch
-from parse_config import ConfigParser
+from pathlib import Path
+
+import utils
+from model import MobileNetV2_with_CSE
+from data_loader import CIFAR10DataLoader
 
 
-def main(config):
-    logger = config.get_logger('test')
+class Tester:
+    def __init__(
+        self,
+        model,
+        test_data_loader,
+        device,
+    ):
+        self.model = model
+        self.test_data_loader = test_data_loader
+        self.device = device
 
-    # setup data_loader instances
-    data_loader = getattr(module_data, config['data_loader']['type'])(
-        config['data_loader']['args']['data_dir'],
-        batch_size=512,
-        shuffle=False,
-        validation_split=0.0,
-        training=False,
-        num_workers=2
+        classes = ["airplane" , "automobile" , "bird", "cat", "deer", "dog", "frog", "horse", "ship", "truck"]
+        self.idx2class = {idx : cls for idx, cls in enumerate(classes)}
+
+    def test(self):
+        correct = 0
+        total = 0
+        with torch.no_grad():
+            for (images, targets) in self.test_data_loader:
+                images, targets = images.to(self.device), targets.to(self.device)
+                outputs = self.model(images)
+                _, predicted = torch.max(outputs.data, 1)
+                total += targets.size(0)
+                correct += (predicted == targets).sum().item()
+
+        print("Accuracy of the network on the 10000 test images: %d %%" % (100 * correct / total))
+
+        class_correct = list(0.0 for _ in range(10))
+        class_total = list(0.0 for _ in range(10))
+
+        with torch.no_grad():
+            for (images, targets) in self.test_data_loader:
+                images, targets = images.to(self.device), targets.to(self.device)
+                outputs = self.model(images)
+                _, predicted = torch.max(outputs, 1)
+                c = (predicted == targets).squeeze()
+                for batch_idx in range(4):
+                    label = targets[batch_idx]
+                    class_correct[label] += c[batch_idx].item()
+                    class_total[label] += 1
+
+        for batch_idx in range(10):
+            print(
+                "Accuracy of %5s : %2d %%" % (
+                    self.idx2class[batch_idx],
+                    100 * class_correct[batch_idx] / class_total[batch_idx],
+                )
+            )
+
+def main(data_dir, saved_model_path, batch_size, summary):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    test_data_loader = CIFAR10DataLoader(data_dir, batch_size=batch_size, training=False)
+
+    # print(f'{saved_model_path = }')
+
+
+    # bottleneck blocks configurations:
+    #   (expansion, out_planes, num_blocks, stride)
+    cfg_btn = [
+        (1, 16, 1, 1),
+        (6, 24, 2, 1),
+        (6, 32, 3, 1),
+    ]
+
+    # channel-wise squeeze and excitation configurations:
+    #   (out_planes, num_blocks, stride)
+    cfg_cse = [
+        (64, 4, 2),
+        (96, 3, 2),
+        (160, 3, 1),
+        (320, 1, 2),
+    ]
+
+    model = MobileNetV2_with_CSE(cfg_btn, cfg_cse).to(device)
+    model.load_state_dict(torch.load(saved_model_path)["model"])
+
+
+    tester = Tester(model, test_data_loader=test_data_loader, device=device)
+    tester.test()
+
+
+
+if __name__ == "__main__":
+    args = argparse.ArgumentParser(
+        description="PyTorch MobileNetV2 based model CIFAR10 Testing"
     )
+    args.add_argument("--data_dir", type=utils.is_dir_path)
+    args.add_argument("--saved_model", type=utils.is_file_path)
+    args.add_argument("--batch_size", default=16, type=int)
+    args.add_argument("--summary", default=True, type=bool)
 
-    # build model architecture
-    model = config.init_obj('arch', module_arch)
-    logger.info(model)
-
-    # get function handles of loss and metrics
-    loss_fn = getattr(module_loss, config['loss'])
-    metric_fns = [getattr(module_metric, met) for met in config['metrics']]
-
-    logger.info('Loading checkpoint: {} ...'.format(config.resume))
-    checkpoint = torch.load(config.resume)
-    state_dict = checkpoint['state_dict']
-    if config['n_gpu'] > 1:
-        model = torch.nn.DataParallel(model)
-    model.load_state_dict(state_dict)
-
-    # prepare model for testing
-    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-    model = model.to(device)
-    model.eval()
-
-    total_loss = 0.0
-    total_metrics = torch.zeros(len(metric_fns))
-
-    with torch.no_grad():
-        for i, (data, target) in enumerate(tqdm(data_loader)):
-            data, target = data.to(device), target.to(device)
-            output = model(data)
-
-            #
-            # save sample images, or do something with output here
-            #
-
-            # computing loss, metrics on test set
-            loss = loss_fn(output, target)
-            batch_size = data.shape[0]
-            total_loss += loss.item() * batch_size
-            for i, metric in enumerate(metric_fns):
-                total_metrics[i] += metric(output, target) * batch_size
-
-    n_samples = len(data_loader.sampler)
-    log = {'loss': total_loss / n_samples}
-    log.update({
-        met.__name__: total_metrics[i].item() / n_samples for i, met in enumerate(metric_fns)
-    })
-    logger.info(log)
-
-
-if __name__ == '__main__':
-    args = argparse.ArgumentParser(description='PyTorch Template')
-    args.add_argument('-c', '--config', default=None, type=str,
-                      help='config file path (default: None)')
-    args.add_argument('-r', '--resume', default=None, type=str,
-                      help='path to latest checkpoint (default: None)')
-    args.add_argument('-d', '--device', default=None, type=str,
-                      help='indices of GPUs to enable (default: all)')
-
-    config = ConfigParser.from_args(args)
-    main(config)
+    args = args.parse_args()
+    main(args.data_dir, args.saved_model, args.batch_size, args.summary)

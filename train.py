@@ -1,73 +1,240 @@
-import argparse
-import collections
-import torch
+import os
 import numpy as np
-import data_loader.data_loaders as module_data
-import model.loss as module_loss
-import model.metric as module_metric
-import model.model as module_arch
-from parse_config import ConfigParser
-from trainer import Trainer
-from utils import prepare_device
+import datetime
+import argparse
+import torch
+
+import utils
+from pathlib import Path
+
+from model import MobileNetV2_with_CSE
+from data_loader import CIFAR10DataLoader
 
 
-# fix random seeds for reproducibility
-SEED = 123
-torch.manual_seed(SEED)
-torch.backends.cudnn.deterministic = True
-torch.backends.cudnn.benchmark = False
-np.random.seed(SEED)
+class Trainer:
+    def __init__(
+        self,
+        model,
+        criterion,
+        optimizer,
+        lr_scheduler,
+        device,
+        train_data_loader,
+        validation_data_loader,
+        best_acc,
+        start_epoch,
+        end_epoch,
+        report_interval,
+        save_folder_path,
+        save_start_epoch=20,
+    ):
 
-def main(config):
-    logger = config.get_logger('train')
+        self.model = model
 
-    # setup data_loader instances
-    data_loader = config.init_obj('data_loader', module_data)
-    valid_data_loader = data_loader.split_validation()
+        self.criterion = criterion
+        self.optimizer = optimizer
+        self.lr_scheduler = lr_scheduler
 
-    # build model architecture, then print to console
-    model = config.init_obj('arch', module_arch)
-    logger.info(model)
+        self.device = device
 
-    # prepare for (multi-device) GPU training
-    device, device_ids = prepare_device(config['n_gpu'])
-    model = model.to(device)
-    if len(device_ids) > 1:
-        model = torch.nn.DataParallel(model, device_ids=device_ids)
+        self.train_data_loader = train_data_loader
+        self.validation_data_loader = validation_data_loader
 
-    # get function handles of loss and metrics
-    criterion = getattr(module_loss, config['loss'])
-    metrics = [getattr(module_metric, met) for met in config['metrics']]
+        self.best_acc = best_acc
+        self.start_epoch = start_epoch
+        self.end_epoch = end_epoch
+        self.report_interval = report_interval
 
-    # build optimizer, learning rate scheduler. delete every lines containing lr_scheduler for disabling scheduler
-    trainable_params = filter(lambda p: p.requires_grad, model.parameters())
-    optimizer = config.init_obj('optimizer', torch.optim, trainable_params)
-    lr_scheduler = config.init_obj('lr_scheduler', torch.optim.lr_scheduler, optimizer)
+        self.save_folder_path = save_folder_path
+        self.save_start_epoch = save_start_epoch
 
-    trainer = Trainer(model, criterion, metrics, optimizer,
-                      config=config,
-                      device=device,
-                      data_loader=data_loader,
-                      valid_data_loader=valid_data_loader,
-                      lr_scheduler=lr_scheduler)
+    def train(self):
+        for epoch in range(self.start_epoch, self.end_epoch):
+            train_loss = 0.0
+            for (inputs, labels) in self.train_data_loader:
+                inputs, labels = inputs.to(self.device), labels.to(self.device)
 
+                # zero the parameter gradients
+                self.optimizer.zero_grad()
+
+                # forward + backward + optimize
+                outputs = self.model(inputs)
+                loss = self.criterion(outputs, labels)
+                loss.backward()
+                self.optimizer.step()
+
+                # print statistics
+                # train_loss += loss.item()
+                # print(f'{epoch, batch_idx + 1, train_loss = }')
+                # if (batch_idx + 1) % int(self.report_interval / batch_size) == 0:  # print every 2000 mini-batches
+                #     print(
+                #         "[%d, %5d] loss: %.9f"
+                #         % (epoch, batch_idx + 1, train_loss / 2000)
+                #     )
+                #     train_loss = 0.0
+
+            with torch.no_grad():
+                if epoch % 1 == 0:
+                    correct = 0
+                    total = 0
+                    for (images, labels) in self.validation_data_loader:
+                        images, labels = images.to(self.device), labels.to(
+                            self.device
+                        )
+                        outputs = self.model(images)
+                        _, predicted = torch.max(outputs.data, 1)
+                        total += labels.size(0)
+                        correct += (predicted == labels).sum().item()
+                cur_acc = 100 * correct / total
+
+                if cur_acc > self.best_acc:
+                    self.best_acc = cur_acc
+                    print(
+                        f"Accuracy of the network on the 10000 test images: {self.best_acc}"
+                    )
+
+                    if epoch >= self.save_start_epoch:
+                        acc_without_dot = f"{self.best_acc:.2f}".replace(
+                            ".", ""
+                        )
+                        save_path = (
+                            self.save_folder_path
+                            + f"epoch-{epoch}"
+                            + f"-acc-{acc_without_dot}.pth"
+                        )
+                        checkpoint = {
+                            "model": self.model.state_dict(),
+                            "optimizer": self.optimizer.state_dict(),
+                            "lr": self.lr_scheduler.state_dict(),
+                            "acc": self.best_acc,
+                            "loss": loss,
+                            "epoch": epoch,
+                        }
+                        torch.save(
+                            checkpoint,
+                            save_path,
+                        )
+
+            # scheduler
+            self.lr_scheduler.step()
+
+
+def resume_training(model, optimizer, checkpoint_path):
+    print("==> Resuming from checkpoint..")
+    checkpoint = torch.load(checkpoint_path)
+
+    model.load_state_dict(checkpoint["model"])
+    optimizer.load_state_dict(checkpoint["optimizer"])
+    lr_scheduled.load_state_dict(checkpoint["lr"])
+    best_acc = checkpoint["acc"]
+    # because if we resume, it will start training epoch should be +1 from now
+    start_epoch = checkpoint["epoch"] + 1
+    return model, optimizer, lr_scheduled, best_acc, start_epoch
+
+
+def make_save_folder(save_folder_path):
+    try:
+        os.makedirs(save_folder_path)
+    except OSError:
+        print("Creation of the directory %s failed" % save_folder_path)
+
+    print(f"save_folder_path: {save_folder_path}")
+
+
+def main(data_dir, epoch, batch_size, summary, resume=False):
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    train_loader = CIFAR10DataLoader(
+        data_dir, batch_size=batch_size, training=True
+    )
+    validation_loader = CIFAR10DataLoader(
+        data_dir, batch_size=batch_size, training=False
+    )
+
+    # bottleneck blocks configurations:
+    #   (expansion, out_planes, num_blocks, stride)
+    cfg_btn = [
+        (1, 16, 1, 1),
+        (6, 24, 2, 1),
+        (6, 32, 3, 1),
+    ]
+
+    # channel-wise squeeze and excitation configurations:
+    #   (out_planes, num_blocks, stride)
+    cfg_cse = [
+        (64, 4, 2),
+        (96, 3, 2),
+        (160, 3, 1),
+        (320, 1, 2),
+    ]
+
+    model = MobileNetV2_with_CSE(cfg_btn, cfg_cse).to(device)
+
+    criterion = torch.nn.CrossEntropyLoss()
+    optimizer = torch.optim.SGD(
+        model.parameters(), lr=0.045, momentum=0.9, weight_decay=4e-5
+    )
+    lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer=optimizer, step_size=1, gamma=0.98)
+    report_interval = 25000
+    best_acc = 0
+    start_epoch = 0
+    resume_checkpoint_path = ""
+
+    if resume:
+        resume_checkpoint_path = args.resume
+        model, optimizer, lr_scheduled, best_acc, start_epoch = resume_training(
+            model,
+            optimizer,
+            resume_checkpoint_path,
+        )
+        save_folder_path = str(Path(resume_checkpoint_path).parent) + "/"
+    else:
+        save_folder_path = (
+            "./save/"
+            + datetime.datetime.now().strftime("%Y-%m-%d-%Hh-%Mm-%Ss")
+            + f"-batch_size-{batch_size}-max_epoch-{epoch}/"
+        )
+
+        make_save_folder(save_folder_path)
+
+    if summary:
+        import torchsummary
+        torchsummary.summary(model, (3, 32, 32), device=device)
+
+    trainer = Trainer(
+        model=model,
+        criterion=criterion,
+        optimizer=optimizer,
+        device=device,
+        train_data_loader=train_loader,
+        validation_data_loader=validation_loader,
+        lr_scheduler=lr_scheduler,
+        best_acc=0,
+        start_epoch=start_epoch,
+        end_epoch=epoch,
+        report_interval=report_interval,
+        save_folder_path=save_folder_path,
+        save_start_epoch=1,
+    )
     trainer.train()
 
+    print("Finished Training")
 
-if __name__ == '__main__':
-    args = argparse.ArgumentParser(description='PyTorch Template')
-    args.add_argument('-c', '--config', default=None, type=str,
-                      help='config file path (default: None)')
-    args.add_argument('-r', '--resume', default=None, type=str,
-                      help='path to latest checkpoint (default: None)')
-    args.add_argument('-d', '--device', default=None, type=str,
-                      help='indices of GPUs to enable (default: all)')
 
-    # custom cli options to modify configuration from default values given in json file.
-    CustomArgs = collections.namedtuple('CustomArgs', 'flags type target')
-    options = [
-        CustomArgs(['--lr', '--learning_rate'], type=float, target='optimizer;args;lr'),
-        CustomArgs(['--bs', '--batch_size'], type=int, target='data_loader;args;batch_size')
-    ]
-    config = ConfigParser.from_args(args, options)
-    main(config)
+if __name__ == "__main__":
+
+    args = argparse.ArgumentParser(
+        description="PyTorch MobileNetV2 based model CIFAR10 Training"
+    )
+    args.add_argument("--data_dir", type=utils.is_dir_path)
+    args.add_argument("--epochs", default=200, type=int)
+    args.add_argument("--batch_size", default=16, type=int)
+    args.add_argument("--summary", default=True, type=bool)
+    args.add_argument(
+        "--resume",
+        default=None,
+        type=lambda x: utils.is_valid_file(parser, x),
+        help="path to latest checkpoint (default: None)",
+    )
+
+    args = args.parse_args()
+    main(args.data_dir, args.epochs, args.batch_size, args.summary, args.resume)
