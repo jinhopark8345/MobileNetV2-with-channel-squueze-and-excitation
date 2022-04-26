@@ -58,6 +58,7 @@ python test.py --data_dir "/home/jinho/ML-datasets/cifar"  \
 - [ ] Trainer, tester class : use dataclass to make code cleaner
 - [ ] add data loader for cifar100, imagenette, imagewolf
 - [ ] make logger class (check out the template project) / measure inferencing time, size ..
+- [ ] remove saved folder / or make saved folder lazily to avoid making empyt dir
 
 ### readme 
 - [ ] add more introduction
