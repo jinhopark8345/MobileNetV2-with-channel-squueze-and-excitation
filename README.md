@@ -8,6 +8,15 @@ torch 1.10.0+cu113
 
 
 # Quick Start
+
+### install packages
+```bash
+virtualenv venv
+source ./venv/bin/activate
+
+
+```
+
 ### Training from scratch
 ```bash
 # Train a network from beginning
@@ -38,7 +47,7 @@ python test.py --data_dir "/home/jinho/ML-datasets/cifar"  \
 
 # example
 python test.py --data_dir "/home/jinho/ML-datasets/cifar"  \
-            --saved_model "/home/jinho/Projects/mobilenetv2-with-cse/saved/2022-04-26-00h-15m-51s-batch_size-16-max_epoch-200/epoch-8-acc-8186.pth"  \
+            --saved_model "/home/jinho/Projects/MobileNetV2-with-channel-squueze-and-excitation/saved/2022-04-26-08h-43m-10s-batch_size-16-max_epoch-200/epoch-183-acc-9060.pth"  \
             --batch_size 16  \
             --summary False
 
@@ -52,7 +61,7 @@ python test.py --data_dir "/home/jinho/ML-datasets/cifar"  \
 
 ```
 ### organize source code
-- [ ] add requirements.txt
+- [X] add requirements.txt
 - [ ] Trainer class : make methods for one epoch running and print statistics
 - [ ] Tester class  : make methods for one epoch running and print statistics
 - [ ] Trainer, tester class : use dataclass to make code cleaner
